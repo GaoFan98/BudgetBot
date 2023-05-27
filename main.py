@@ -70,22 +70,33 @@ class EditLastExpense(StatesGroup):
     amount = State()
     date = State()
     category = State()
+    comment = State()
 
 
-# Define the on_startup() function to connect to the Notion API
 async def on_startup(dp):
+    result = notion.databases.query(
+        database_id=table_id,
+        sorts=[{"property": "Date", "direction": "descending"}],
+        page_size=1
+    )
+
     # Create a keyboard with buttons for the /help and /add_expense commands
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
+
+    if len(result["results"]) > 0:
+        # If the table is not empty, add the /edit_last_expense command
+        keyboard.add(KeyboardButton('/edit_last_expense'))
 
     # Send a message with the available commands
     await bot.send_message(chat_id=tg_admin_id, text="Welcome to the Notion Expense Tracker bot!\n\n"
                                                      "Here are the available commands:", reply_markup=keyboard)
     await bot.send_message(chat_id=tg_admin_id, text="/help - Show this help message")
     await bot.send_message(chat_id=tg_admin_id, text="/add_expense - Add a new expense")
+    if len(result["results"]) > 0:
+        await bot.send_message(chat_id=tg_admin_id, text="/edit_last_expense - Edit last expense")
 
 
-# Define the on_shutdown() function to disconnect from the Notion API
 async def on_shutdown():
     await bot.send_message(chat_id=tg_admin_id, text="Bot stopped")
     notion.close()
@@ -123,8 +134,19 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 
     await state.finish()
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+
+    # Query the last entry in the database to check if it's empty
+    result = notion.databases.query(
+        database_id=table_id,
+        sorts=[{"property": "Date", "direction": "descending"}],
+        page_size=1
+    )
+
     keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
-    await message.answer("Command cancelled. Here are the available commands:", reply_markup=keyboard)
+    if len(result["results"]) > 0:  # Add /edit_last_expense if the table is not empty
+        keyboard.add(KeyboardButton('/edit_last_expense'))
+
+    await message.answer("Command cancelled.", reply_markup=keyboard)
 
 
 @add_cancel_button()
@@ -221,6 +243,7 @@ async def add_expense_category(message: types.Message, state: FSMContext):
     await message.answer("Expense added successfully!", reply_markup=keyboard)
 
 
+@add_cancel_button()
 @dp.message_handler(commands=["edit_last_expense"], state="*")
 async def edit_last_expense(message: types.Message, state: FSMContext):
     # Fetch the last expense from the Notion table
@@ -246,18 +269,33 @@ async def edit_last_expense(message: types.Message, state: FSMContext):
         date = last_expense["properties"]["Date"]["date"]["start"]
         category = last_expense["properties"]["Category"]["rich_text"][0]["plain_text"]
 
+        # Check if Comment exists and if it's not empty
+        if "Comment" in last_expense["properties"] and last_expense["properties"]["Comment"]["rich_text"]:
+            comment = last_expense["properties"]["Comment"]["rich_text"][0]["plain_text"]
+        else:
+            comment = ''
+
         data['name'] = name
         data['amount'] = amount
         data['date'] = date
         data['category'] = category
+        data['comment'] = comment
 
-    await message.answer("Current column values of the last expense:\n"
-                         f"Name: {name}\n"
-                         f"Amount: {amount}\n"
-                         f"Date: {date}\n"
-                         f"Category: {category}")
+    # Include comment in the message if it exists
+    message_text = "Current column values of the last expense:\n" \
+                   f"Name: {name}\n" \
+                   f"Amount: {amount}\n" \
+                   f"Date: {date}\n" \
+                   f"Category: {category}"
+    if comment:
+        message_text += f"\nComment: {comment}"
 
-    await message.answer("Enter the new value for the 'Name' column:")
+    await message.answer(message_text)
+
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton('/cancel'))
+
+    await message.answer("Enter the new value for the 'Name' column:", reply_markup=keyboard)
     await EditLastExpense.name.set()
 
 
@@ -286,6 +324,17 @@ async def edit_expense_amount(message: types.Message, state: FSMContext):
 
     async with state.proxy() as data:
         data['amount'] = message.text
+
+    await message.answer("Enter the new comment for the expense:")
+    await EditLastExpense.comment.set()
+
+
+@add_cancel_button()
+@dp.message_handler(state=EditLastExpense.comment)
+async def edit_expense_comment(message: types.Message, state: FSMContext):
+    comment = message.text.strip()
+    async with state.proxy() as data:
+        data['comment'] = comment
 
     await message.answer("Enter the new value for the 'Date' column (YYYY-MM-DD):")
     await EditLastExpense.date.set()
@@ -326,13 +375,15 @@ async def edit_expense_category(message: types.Message, state: FSMContext):
         name = data['name']
         amount = float(data['amount'])
         date = data['date']
+        comment = data['comment']
 
-    # Update the last expense record in the Notion table
+        # Update the last expense record in the Notion table
     notion_expense = {
         "Name": {"title": [{"text": {"content": name}}]},
         "Amount": {"number": amount},
         "Date": {"date": {"start": date}},
-        "Category": {"rich_text": [{"text": {"content": category}}]}
+        "Category": {"rich_text": [{"text": {"content": category}}]},
+        "Comment": {"rich_text": [{"text": {"content": comment}}]}
     }
     notion.pages.update(page_id=last_expense_id, properties=notion_expense)
 
@@ -357,6 +408,7 @@ dp.register_message_handler(edit_expense_name, state=EditLastExpense.name)
 dp.register_message_handler(edit_expense_amount, state=EditLastExpense.amount)
 dp.register_message_handler(edit_expense_date, state=EditLastExpense.date)
 dp.register_message_handler(edit_expense_category, state=EditLastExpense.category)
+dp.register_message_handler(edit_expense_comment, state=EditLastExpense.comment)
 
 if __name__ == '__main__':
     from aiogram import executor
