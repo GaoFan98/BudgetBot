@@ -116,13 +116,27 @@ async def start(message: types.Message):
 
 @dp.message_handler(commands=["help"])
 async def help(message: types.Message):
-    # Create a keyboard with a button for the /add_expense command
+    result = notion.databases.query(
+        database_id=table_id,
+        sorts=[{"property": "Date", "direction": "descending"}],
+        page_size=1
+    )
+    # Create a keyboard with buttons for the /help and /add_expense commands
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton('/add_expense'))
+    keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
 
-    help_message = "Here are the available commands:\n"
-    help_message += "/help - Show this help message\n"
-    help_message += "/add_expense - Add a new expense\n"
+    if len(result["results"]) > 0:
+        # If the table is not empty, add the /edit_last_expense command
+        keyboard.add(KeyboardButton('/edit_last_expense'))
+        help_message = "Here are the available commands:\n"
+        help_message += "/help - Show this help message\n"
+        help_message += "/add_expense - Add a new expense\n"
+        help_message += "/edit_last_expense - Edit last expense\n"
+    else:
+        help_message = "Here are the available commands:\n"
+        help_message += "/help - Show this help message\n"
+        help_message += "/add_expense - Add a new expense\n"
+
     await message.answer(help_message, reply_markup=keyboard)
 
 
