@@ -15,7 +15,7 @@ alphanumeric_regex = re.compile(r'^[a-zA-Z0-9\s]+$')
 numeric_regex = re.compile(r'^\d+(\.\d+)?$')
 
 # Predefined list of categories
-categories = ['Food', 'Transport', 'Entertainment', 'Bills', 'Other']
+categories = ['Food', 'Transport', 'Entertainment', 'Rent', 'Internet', 'Education', 'Utilities', 'Other']
 
 
 def add_cancel_button(state=None):
