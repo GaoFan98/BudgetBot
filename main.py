@@ -65,6 +65,13 @@ class AddExpense(StatesGroup):
     comment = State()
 
 
+class EditLastExpense(StatesGroup):
+    name = State()
+    amount = State()
+    date = State()
+    category = State()
+
+
 # Define the on_startup() function to connect to the Notion API
 async def on_startup(dp):
     # Create a keyboard with buttons for the /help and /add_expense commands
@@ -251,11 +258,11 @@ async def edit_last_expense(message: types.Message, state: FSMContext):
                          f"Category: {category}")
 
     await message.answer("Enter the new value for the 'Name' column:")
-    await AddExpense.name.set()
+    await EditLastExpense.name.set()
 
 
 @add_cancel_button()
-@dp.message_handler(state=AddExpense.name)
+@dp.message_handler(state=EditLastExpense.name)
 async def edit_expense_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     if not alphanumeric_regex.match(name):
@@ -266,11 +273,11 @@ async def edit_expense_name(message: types.Message, state: FSMContext):
         data['name'] = message.text
 
     await message.answer("Enter the new value for the 'Amount' column:")
-    await AddExpense.amount.set()
+    await EditLastExpense.amount.set()
 
 
 @add_cancel_button()
-@dp.message_handler(state=AddExpense.amount)
+@dp.message_handler(state=EditLastExpense.amount)
 async def edit_expense_amount(message: types.Message, state: FSMContext):
     amount = message.text.strip()
     if not numeric_regex.match(amount):
@@ -281,11 +288,11 @@ async def edit_expense_amount(message: types.Message, state: FSMContext):
         data['amount'] = message.text
 
     await message.answer("Enter the new value for the 'Date' column (YYYY-MM-DD):")
-    await AddExpense.date.set()
+    await EditLastExpense.date.set()
 
 
 @add_cancel_button()
-@dp.message_handler(state=AddExpense.date)
+@dp.message_handler(state=EditLastExpense.date)
 async def edit_expense_date(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         try:
@@ -295,12 +302,16 @@ async def edit_expense_date(message: types.Message, state: FSMContext):
             await message.answer("Invalid date format. Please enter a date in the format YYYY-MM-DD.")
             return
 
-    await message.answer("Enter the new value for the 'Category' column:")
-    await AddExpense.category.set()
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    for category in categories:
+        keyboard.add(KeyboardButton(category))
+
+    await message.answer("Enter the new value for the 'Category' column:", reply_markup=keyboard)
+    await EditLastExpense.category.set()
 
 
 @add_cancel_button()
-@dp.message_handler(state=AddExpense.category)
+@dp.message_handler(state=EditLastExpense.category)
 async def edit_expense_category(message: types.Message, state: FSMContext):
     category = message.text.strip()
     if category not in categories:
@@ -315,9 +326,8 @@ async def edit_expense_category(message: types.Message, state: FSMContext):
         name = data['name']
         amount = float(data['amount'])
         date = data['date']
-        category = data['category']
 
-    # Update the expense in the Notion table
+    # Update the last expense record in the Notion table
     notion_expense = {
         "Name": {"title": [{"text": {"content": name}}]},
         "Amount": {"number": amount},
@@ -343,10 +353,10 @@ dp.register_message_handler(add_expense_amount, state=AddExpense.amount)
 dp.register_message_handler(add_expense_date, state=AddExpense.date)
 dp.register_message_handler(add_expense_category, state=AddExpense.category)
 dp.register_message_handler(edit_last_expense, commands=["edit_last_expense"])
-dp.register_message_handler(edit_expense_name, state=AddExpense.name)
-dp.register_message_handler(edit_expense_amount, state=AddExpense.amount)
-dp.register_message_handler(edit_expense_date, state=AddExpense.date)
-dp.register_message_handler(edit_expense_category, state=AddExpense.category)
+dp.register_message_handler(edit_expense_name, state=EditLastExpense.name)
+dp.register_message_handler(edit_expense_amount, state=EditLastExpense.amount)
+dp.register_message_handler(edit_expense_date, state=EditLastExpense.date)
+dp.register_message_handler(edit_expense_category, state=EditLastExpense.category)
 
 if __name__ == '__main__':
     from aiogram import executor
