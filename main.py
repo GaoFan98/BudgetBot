@@ -18,7 +18,7 @@ numeric_regex = re.compile(r'^\d+(\.\d+)?$')
 categories = ['Food', 'Transport', 'Entertainment', 'Rent', 'Internet', 'Education', 'Utilities', 'Other']
 
 
-def add_cancel_button(state=None):
+def add_cancel_button():
     def decorator(func):
         async def wrapper(message: types.Message, state: FSMContext = None, **kwargs):
             # Create a keyboard without a cancel button
@@ -134,7 +134,7 @@ async def add_expense(message: types.Message, state: FSMContext):
     await AddExpense.name.set()
 
 
-@add_cancel_button(state=AddExpense.name)
+@add_cancel_button()
 @dp.message_handler(state=AddExpense.name)
 async def add_expense_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
@@ -149,7 +149,7 @@ async def add_expense_name(message: types.Message, state: FSMContext):
     await AddExpense.amount.set()
 
 
-@add_cancel_button(state=AddExpense.amount)
+@add_cancel_button()
 @dp.message_handler(state=AddExpense.amount)
 async def add_expense_amount(message: types.Message, state: FSMContext):
     amount = message.text.strip()
@@ -168,7 +168,7 @@ async def add_expense_amount(message: types.Message, state: FSMContext):
     await AddExpense.category.set()
 
 
-@add_cancel_button(state=AddExpense.date)
+@add_cancel_button()
 @dp.message_handler(state=AddExpense.date)
 async def add_expense_date(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
@@ -183,7 +183,7 @@ async def add_expense_date(message: types.Message, state: FSMContext):
     await AddExpense.category.set()
 
 
-@add_cancel_button(state=AddExpense.category)
+@add_cancel_button()
 @dp.message_handler(state=AddExpense.category)
 async def add_expense_category(message: types.Message, state: FSMContext):
     category = message.text.strip()
@@ -208,10 +208,131 @@ async def add_expense_category(message: types.Message, state: FSMContext):
     # Reset the state machine
     await state.finish()
 
-    # Reset the keyboard markup to remove the /cancel button
+    # Reset the keyboard markup to include the edit_last_expense command
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
+    keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'), KeyboardButton('/edit_last_expense'))
     await message.answer("Expense added successfully!", reply_markup=keyboard)
+
+
+@dp.message_handler(commands=["edit_last_expense"], state="*")
+async def edit_last_expense(message: types.Message, state: FSMContext):
+    # Fetch the last expense from the Notion table
+    result = notion.databases.query(
+        database_id=table_id,
+        sorts=[{"property": "Date", "direction": "descending"}],
+        page_size=1
+    )
+
+    if len(result["results"]) == 0:
+        await message.answer("No expenses found to edit.")
+        return
+
+    last_expense = result["results"][0]
+    last_expense_id = last_expense["id"]
+
+    async with state.proxy() as data:
+        data['last_expense_id'] = last_expense_id
+
+        # Retrieve the current column values of the last expense
+        name = last_expense["properties"]["Name"]["title"][0]["plain_text"]
+        amount = str(last_expense["properties"]["Amount"]["number"])
+        date = last_expense["properties"]["Date"]["date"]["start"]
+        category = last_expense["properties"]["Category"]["rich_text"][0]["plain_text"]
+
+        data['name'] = name
+        data['amount'] = amount
+        data['date'] = date
+        data['category'] = category
+
+    await message.answer("Current column values of the last expense:\n"
+                         f"Name: {name}\n"
+                         f"Amount: {amount}\n"
+                         f"Date: {date}\n"
+                         f"Category: {category}")
+
+    await message.answer("Enter the new value for the 'Name' column:")
+    await AddExpense.name.set()
+
+
+@add_cancel_button()
+@dp.message_handler(state=AddExpense.name)
+async def edit_expense_name(message: types.Message, state: FSMContext):
+    name = message.text.strip()
+    if not alphanumeric_regex.match(name):
+        await message.answer("Invalid input. Name should only contain alphanumeric characters and spaces.")
+        return
+
+    async with state.proxy() as data:
+        data['name'] = message.text
+
+    await message.answer("Enter the new value for the 'Amount' column:")
+    await AddExpense.amount.set()
+
+
+@add_cancel_button()
+@dp.message_handler(state=AddExpense.amount)
+async def edit_expense_amount(message: types.Message, state: FSMContext):
+    amount = message.text.strip()
+    if not numeric_regex.match(amount):
+        await message.answer("Invalid input. Amount should be a number.")
+        return
+
+    async with state.proxy() as data:
+        data['amount'] = message.text
+
+    await message.answer("Enter the new value for the 'Date' column (YYYY-MM-DD):")
+    await AddExpense.date.set()
+
+
+@add_cancel_button()
+@dp.message_handler(state=AddExpense.date)
+async def edit_expense_date(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        try:
+            date = datetime.strptime(message.text, "%Y-%m-%d")
+            data['date'] = date.date().isoformat()
+        except ValueError:
+            await message.answer("Invalid date format. Please enter a date in the format YYYY-MM-DD.")
+            return
+
+    await message.answer("Enter the new value for the 'Category' column:")
+    await AddExpense.category.set()
+
+
+@add_cancel_button()
+@dp.message_handler(state=AddExpense.category)
+async def edit_expense_category(message: types.Message, state: FSMContext):
+    category = message.text.strip()
+    if category not in categories:
+        await message.answer("Invalid category. Please select one of the available categories.")
+        return
+
+    async with state.proxy() as data:
+        data['category'] = message.text
+
+        # Retrieve the current column values from the state
+        last_expense_id = data['last_expense_id']
+        name = data['name']
+        amount = float(data['amount'])
+        date = data['date']
+        category = data['category']
+
+    # Update the expense in the Notion table
+    notion_expense = {
+        "Name": {"title": [{"text": {"content": name}}]},
+        "Amount": {"number": amount},
+        "Date": {"date": {"start": date}},
+        "Category": {"rich_text": [{"text": {"content": category}}]}
+    }
+    notion.pages.update(page_id=last_expense_id, properties=notion_expense)
+
+    # Reset the state machine
+    await state.finish()
+
+    # Reset the keyboard markup to include the edit_last_expense command
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'), KeyboardButton('/edit_last_expense'))
+    await message.answer("Expense updated successfully!", reply_markup=keyboard)
 
 
 dp.register_message_handler(start, commands=["start"])
@@ -221,6 +342,11 @@ dp.register_message_handler(add_expense_name, state=AddExpense.name)
 dp.register_message_handler(add_expense_amount, state=AddExpense.amount)
 dp.register_message_handler(add_expense_date, state=AddExpense.date)
 dp.register_message_handler(add_expense_category, state=AddExpense.category)
+dp.register_message_handler(edit_last_expense, commands=["edit_last_expense"])
+dp.register_message_handler(edit_expense_name, state=AddExpense.name)
+dp.register_message_handler(edit_expense_amount, state=AddExpense.amount)
+dp.register_message_handler(edit_expense_date, state=AddExpense.date)
+dp.register_message_handler(edit_expense_category, state=AddExpense.category)
 
 if __name__ == '__main__':
     from aiogram import executor
