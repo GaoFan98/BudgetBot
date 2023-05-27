@@ -3,11 +3,9 @@ version: '3.8'
 services:
   app:
     build: .
-    ports:
-      - "80:80"
     env_file:
       - .env
     volumes:
-      - ./main.py:/app/main.py
-
-    command: [ "python", "main.py" ]
+      - ./:/app
+    ports:
+      - "80:80"

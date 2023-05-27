@@ -16,5 +16,8 @@ EXPOSE 80
 # Define environment variable
 ENV NAME World
 
-# Run main.py when the container launches
-CMD ["python", "main.py"]
+# Make the shell script executable
+RUN chmod +x /app/run_dev.sh
+
+# Run run_dev.sh when the container launches
+CMD ["/app/run_dev.sh"]

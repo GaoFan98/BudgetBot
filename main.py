@@ -18,14 +18,18 @@ numeric_regex = re.compile(r'^\d+(\.\d+)?$')
 def add_cancel_button(state=None):
     def decorator(func):
         async def wrapper(message: types.Message, state: FSMContext = None, **kwargs):
-            # Create a keyboard with a button for the /cancel command
+            # Create a keyboard without a cancel button
             keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-            keyboard.add(KeyboardButton('/cancel'))
 
-            # Check if the message handler has a state
             if state is not None:
+                # Load the current state data
                 async with state.proxy() as data:
                     kwargs['data'] = data
+
+                    # Check if the cancel flag is set
+                    if data.get('cancel', False):
+                        # Add the cancel button to the keyboard
+                        keyboard.add(KeyboardButton('/cancel'))
 
                 # Call the function with the state and keyboard
                 await func(message, state, keyboard, **kwargs)
@@ -72,7 +76,7 @@ async def on_startup(dp):
 
 
 # Define the on_shutdown() function to disconnect from the Notion API
-async def on_shutdown(dp):
+async def on_shutdown():
     await bot.send_message(chat_id=tg_admin_id, text="Bot stopped")
     notion.close()
 
@@ -103,7 +107,9 @@ async def help(message: types.Message):
 
 @dp.message_handler(commands=["cancel"], state="*")
 async def cancel_handler(message: types.Message, state: FSMContext):
-    # Command handler to cancel the current state and go back to the initial state.
+    # Clear the cancel flag in the state
+    async with state.proxy() as data:
+        data['cancel'] = False
 
     await state.finish()
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -113,8 +119,14 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 
 @add_cancel_button()
 @dp.message_handler(commands=["add_expense"])
-async def add_expense(message: types.Message):
+async def add_expense(message: types.Message, state: FSMContext):
+    # Set the cancel flag in the state
+    async with state.proxy() as data:
+        data['cancel'] = True
+
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton('/cancel'))
+
     await message.answer("What's the name of the expense?", reply_markup=keyboard)
     await AddExpense.name.set()
 
@@ -199,10 +211,13 @@ async def add_expense_comment(message: types.Message, state: FSMContext):
     }
     notion.pages.create(parent={"database_id": table_id}, properties=notion_expense)
 
-    await message.answer("Expense added successfully!")
-
     # Reset the state machine
     await state.finish()
+
+    # Reset the keyboard markup to remove the /cancel button
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
+    await message.answer("Expense added successfully! Here are the available commands:", reply_markup=keyboard)
 
 
 dp.register_message_handler(start, commands=["start"])
