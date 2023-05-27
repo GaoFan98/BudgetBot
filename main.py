@@ -14,6 +14,9 @@ import re
 alphanumeric_regex = re.compile(r'^[a-zA-Z0-9\s]+$')
 numeric_regex = re.compile(r'^\d+(\.\d+)?$')
 
+# Predefined list of categories
+categories = ['Food', 'Transport', 'Entertainment', 'Bills', 'Other']
+
 
 def add_cancel_button(state=None):
     def decorator(func):
@@ -157,8 +160,12 @@ async def add_expense_amount(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['amount'] = message.text
 
-    await message.answer("What was the date of the expense? (YYYY-MM-DD)")
-    await AddExpense.date.set()
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    for category in categories:
+        keyboard.add(KeyboardButton(category))
+
+    await message.answer("Select a category for this expense:", reply_markup=keyboard)
+    await AddExpense.category.set()
 
 
 @add_cancel_button(state=AddExpense.date)
@@ -180,34 +187,21 @@ async def add_expense_date(message: types.Message, state: FSMContext):
 @dp.message_handler(state=AddExpense.category)
 async def add_expense_category(message: types.Message, state: FSMContext):
     category = message.text.strip()
-    if not alphanumeric_regex.match(category):
-        await message.answer("Invalid input. Category should only contain alphanumeric characters and spaces.")
+    if category not in categories:
+        await message.answer("Invalid category. Please select one of the available categories.")
         return
 
     async with state.proxy() as data:
         data['category'] = message.text
+        data['date'] = datetime.now().date().isoformat()
 
-    await message.answer("Do you have any comments about this expense?")
-    await AddExpense.comment.set()
-
-
-@add_cancel_button(state=AddExpense.comment)
-@dp.message_handler(state=AddExpense.comment)
-async def add_expense_comment(message: types.Message, state: FSMContext):
-    comment = message.text.strip()
-    if not alphanumeric_regex.match(comment):
-        await message.answer("Invalid input. Comment should only contain alphanumeric characters and spaces.")
-        return
-
-    async with state.proxy() as data:
-        data['comment'] = message.text
     # Save the data to the Notion table
     notion_expense = {
         "Name": {"title": [{"text": {"content": data['name']}}]},
         "Amount": {"number": float(data['amount'])},
         "Date": {"date": {"start": data['date']}},
         "Category": {"rich_text": [{"text": {"content": data['category']}}]},
-        "Comment": {"rich_text": [{"text": {"content": data['comment']}}]}
+        "Comment": {"rich_text": [{"text": {"content": ""}}]}  # Comment is left blank for now
     }
     notion.pages.create(parent={"database_id": table_id}, properties=notion_expense)
 
@@ -217,7 +211,7 @@ async def add_expense_comment(message: types.Message, state: FSMContext):
     # Reset the keyboard markup to remove the /cancel button
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(KeyboardButton('/help'), KeyboardButton('/add_expense'))
-    await message.answer("Expense added successfully! Here are the available commands:", reply_markup=keyboard)
+    await message.answer("Expense added successfully!", reply_markup=keyboard)
 
 
 dp.register_message_handler(start, commands=["start"])
@@ -227,7 +221,6 @@ dp.register_message_handler(add_expense_name, state=AddExpense.name)
 dp.register_message_handler(add_expense_amount, state=AddExpense.amount)
 dp.register_message_handler(add_expense_date, state=AddExpense.date)
 dp.register_message_handler(add_expense_category, state=AddExpense.category)
-dp.register_message_handler(add_expense_comment, state=AddExpense.comment)
 
 if __name__ == '__main__':
     from aiogram import executor
